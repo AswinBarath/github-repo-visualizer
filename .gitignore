@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment (keep example, ignore real env)
+.env
+!.env.example
+
+# Data cache (keep folder, ignore contents)
+data/
+!data/.gitkeep
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

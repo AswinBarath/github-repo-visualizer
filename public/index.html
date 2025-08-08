@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GitHub Repo Visualizer</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    header { position: sticky; top: 0; backdrop-filter: blur(4px); background: color-mix(in oklab, Canvas 90%, transparent); padding: 12px 16px; border-bottom: 1px solid color-mix(in oklab, CanvasText 10%, transparent); z-index: 2; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .toolbar { display: grid; gap: 8px; grid-template-columns: 1fr 160px 160px 160px 160px 160px 160px 1fr 100px; align-items: center; }
+    input, select { padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in oklab, CanvasText 10%, transparent); background: Canvas; color: CanvasText; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); margin-top: 16px; }
+    .card { border: 1px solid color-mix(in oklab, CanvasText 10%, transparent); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: Canvas; }
+    .name { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4493f8; }
+    .desc { color: color-mix(in oklab, CanvasText 60%, transparent); font-size: 13px; min-height: 32px; }
+    .meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: color-mix(in oklab, CanvasText 60%, transparent); }
+    .pill { padding: 2px 8px; border-radius: 999px; border: 1px solid color-mix(in oklab, CanvasText 15%, transparent); font-size: 11px; }
+    .footer { display: flex; justify-content: space-between; align-items: center; }
+    .link { text-decoration: none; color: #4493f8; }
+    .badges { display: flex; gap: 6px; align-items: center; }
+    mark { background: transparent; color: #4493f8; font-weight: 600; }
+  .suggestions { position: absolute; background: Canvas; border: 1px solid color-mix(in oklab, CanvasText 10%, transparent); border-radius: 8px; margin-top: 4px; width: min(560px, 90vw); max-height: 240px; overflow: auto; box-shadow: 0 6px 24px rgba(0,0,0,0.1); }
+  .suggestions div { padding: 8px 10px; cursor: pointer; }
+  .suggestions div:hover { background: color-mix(in oklab, Canvas 92%, CanvasText 8%); }
+  .flex { display: flex; gap: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="toolbar">
+        <div style="position:relative">
+          <input id="q" type="search" placeholder="Search repositories (name, description, language, topics)" style="width:100%" />
+          <div id="suggestions" class="suggestions" style="display:none"></div>
+        </div>
+        <select id="lang">
+          <option value="">All languages</option>
+        </select>
+        <select id="activity">
+          <option value="">Any activity</option>
+          <option value="30">Updated in 30 days</option>
+          <option value="90">Updated in 90 days</option>
+          <option value="365">Updated in 1 year</option>
+        </select>
+        <select id="type">
+          <option value="">Any type</option>
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+          <option value="fork">Forks</option>
+          <option value="source">Source</option>
+          <option value="archived">Archived</option>
+        </select>
+        <select id="stars">
+          <option value="">Any stars</option>
+          <option value="1-9">1–9</option>
+          <option value="10-49">10–49</option>
+          <option value="50-199">50–199</option>
+          <option value="200-999">200–999</option>
+          <option value="1000+">1000+</option>
+        </select>
+        <select id="size">
+          <option value="">Any size</option>
+          <option value="0-100">0–100 KB</option>
+          <option value="100-1000">100–1000 KB</option>
+          <option value="1000+">≥ 1 MB</option>
+        </select>
+        <select id="sort">
+          <option value="updated">Sort: Updated</option>
+          <option value="stars">Sort: Stars</option>
+          <option value="name">Sort: Name</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="flex" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+      <div id="summary" class="meta"></div>
+      <div class="flex">
+        <select id="saved"></select>
+        <button id="saveFilter">Save Filter</button>
+      </div>
+    </div>
+    <div id="grid" class="grid"></div>
+  </main>
+
+  <script>
+    const grid = document.getElementById('grid');
+    const q = document.getElementById('q');
+    const langSel = document.getElementById('lang');
+    const activitySel = document.getElementById('activity');
+  const sortSel = document.getElementById('sort');
+  const typeSel = document.getElementById('type');
+  const starsSel = document.getElementById('stars');
+  const sizeSel = document.getElementById('size');
+  const summary = document.getElementById('summary');
+  const savedSel = document.getElementById('saved');
+  const saveBtn = document.getElementById('saveFilter');
+  const suggestions = document.getElementById('suggestions');
+
+    let state = { repos: [], filtered: [] };
+
+    fetch('/api/repos')
+      .then(r => r.json())
+      .then(data => {
+        state.repos = data.repositories || [];
+        populateLanguages(state.repos);
+        applyFilters();
+        summary.textContent = `${state.repos.length} repos • Cache updated ${new Date(data.last_updated).toLocaleString()}`;
+        // Also fetch status
+        fetch('/api/status').then(r=>r.json()).then(s => {
+          if (s && s.rate) {
+            const remain = `${s.rate.remaining}/${s.rate.limit}`;
+            summary.textContent += ` • Rate ${remain}`;
+          }
+        }).catch(()=>{});
+        loadSavedFilters();
+      })
+      .catch(() => {
+        grid.innerHTML = '<p>Cache not found. Start the server and run initial fetch.</p>'
+      });
+
+    q.addEventListener('input', applyFilters);
+    langSel.addEventListener('change', applyFilters);
+    activitySel.addEventListener('change', applyFilters);
+  sortSel.addEventListener('change', applyFilters);
+  typeSel.addEventListener('change', applyFilters);
+  starsSel.addEventListener('change', applyFilters);
+  sizeSel.addEventListener('change', applyFilters);
+  savedSel.addEventListener('change', () => applySaved(savedSel.value));
+  saveBtn.addEventListener('click', saveCurrentFilter);
+  q.addEventListener('input', updateSuggestions);
+  q.addEventListener('focus', updateSuggestions);
+  q.addEventListener('blur', () => setTimeout(()=> suggestions.style.display='none', 150));
+
+    function populateLanguages(repos) {
+      const set = new Set();
+      repos.forEach(r => { if (r.language) set.add(r.language); });
+      [...set].sort().forEach(l => {
+        const o = document.createElement('option');
+        o.value = l; o.textContent = l; langSel.appendChild(o);
+      });
+    }
+
+    function applyFilters() {
+      const text = q.value.toLowerCase();
+      const lang = langSel.value;
+      const days = Number(activitySel.value || 0);
+      const sort = sortSel.value;
+      const type = typeSel.value;
+      const stars = starsSel.value;
+      const size = sizeSel.value;
+
+      const cutoff = days ? Date.now() - days*24*60*60*1000 : 0;
+
+      let arr = state.repos.filter(r => {
+        const matchesText = !text ||
+          r.name?.toLowerCase().includes(text) ||
+          r.description?.toLowerCase().includes(text) ||
+          r.language?.toLowerCase().includes(text) ||
+          (r.topics || []).some(t => t.toLowerCase().includes(text));
+        const matchesLang = !lang || r.language === lang;
+        const matchesActivity = !cutoff || new Date(r.updated_at).getTime() >= cutoff;
+        const matchesType = !type ||
+          (type === 'public' && !r.private) ||
+          (type === 'private' && r.private) ||
+          (type === 'fork' && r.fork) ||
+          (type === 'source' && !r.fork) ||
+          (type === 'archived' && r.archived);
+        const [starMin, starMax] = parseRange(stars);
+        const inStarRange = starMin === null || (r.stargazers_count >= starMin && (starMax === null || r.stargazers_count <= starMax));
+        const [sizeMin, sizeMax] = parseRange(size, true);
+        const inSizeRange = sizeMin === null || (r.size >= sizeMin && (sizeMax === null || r.size <= sizeMax));
+        return matchesText && matchesLang && matchesActivity && matchesType && inStarRange && inSizeRange;
+      });
+
+      if (sort === 'updated') arr.sort((a,b) => new Date(b.updated_at)-new Date(a.updated_at));
+      else if (sort === 'stars') arr.sort((a,b) => b.stargazers_count - a.stargazers_count);
+      else if (sort === 'name') arr.sort((a,b) => a.name.localeCompare(b.name));
+
+      state.filtered = arr;
+  render(text);
+    }
+
+    function render(queryText) {
+      grid.innerHTML = '';
+      state.filtered.forEach(r => {
+        const el = document.createElement('div');
+        el.className = 'card';
+        const nameHtml = highlight(r.name, queryText);
+        const descHtml = highlight(r.description || '', queryText);
+        el.innerHTML = `
+          <div class="name"><a class="link" href="${r.html_url}" target="_blank" rel="noreferrer">${nameHtml}</a></div>
+          <div class="desc">${descHtml}</div>
+          <div class="meta">
+            <span class="pill">${r.language || 'Unknown'}</span>
+            <span>★ ${r.stargazers_count || 0}</span>
+            <span>⑂ ${r.forks_count || 0}</span>
+          </div>
+          <div class="footer">
+            <span class="meta">Updated ${new Date(r.updated_at).toLocaleDateString()}</span>
+            <a class="link" href="${r.clone_url}" target="_blank" rel="noreferrer">Clone</a>
+          </div>
+        `;
+        grid.appendChild(el);
+      });
+    }
+
+    function currentFilterState() {
+      return {
+        q: q.value,
+        lang: langSel.value,
+        activity: activitySel.value,
+        type: typeSel.value,
+        stars: starsSel.value,
+        size: sizeSel.value,
+        sort: sortSel.value,
+      };
+    }
+
+    function loadSavedFilters() {
+      const list = JSON.parse(localStorage.getItem('savedFilters') || '[]');
+      savedSel.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = ''; def.textContent = 'Saved filters...';
+      savedSel.appendChild(def);
+      list.forEach((item, i) => {
+        const o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = item.name;
+        savedSel.appendChild(o);
+      });
+    }
+
+    function saveCurrentFilter() {
+      const name = prompt('Name this filter');
+      if (!name) return;
+      const list = JSON.parse(localStorage.getItem('savedFilters') || '[]');
+      list.push({ name, state: currentFilterState() });
+      localStorage.setItem('savedFilters', JSON.stringify(list));
+      loadSavedFilters();
+    }
+
+    function applySaved(idxStr) {
+      if (idxStr === '') return;
+      const idx = Number(idxStr);
+      const list = JSON.parse(localStorage.getItem('savedFilters') || '[]');
+      const item = list[idx];
+      if (!item) return;
+      const s = item.state;
+      q.value = s.q || '';
+      langSel.value = s.lang || '';
+      activitySel.value = s.activity || '';
+      typeSel.value = s.type || '';
+      starsSel.value = s.stars || '';
+      sizeSel.value = s.size || '';
+      sortSel.value = s.sort || 'updated';
+      applyFilters();
+    }
+
+    function updateSuggestions() {
+      const text = q.value.trim().toLowerCase();
+      if (!text) { suggestions.style.display='none'; return; }
+      const pool = new Set();
+      state.repos.forEach(r => {
+        if (r.name) pool.add(r.name);
+        if (r.language) pool.add(r.language);
+        (r.topics||[]).forEach(t=> pool.add(t));
+      });
+      const items = [...pool].filter(x => x.toLowerCase().includes(text)).slice(0, 8);
+      if (!items.length) { suggestions.style.display='none'; return; }
+      suggestions.innerHTML = items.map(s => `<div data-v="${s}">${highlight(s, text)}</div>`).join('');
+      suggestions.querySelectorAll('div').forEach(d => {
+        d.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          q.value = d.getAttribute('data-v');
+          suggestions.style.display='none';
+          applyFilters();
+        });
+      });
+      suggestions.style.display='block';
+    }
+
+  function parseRange(val) {
+      if (!val) return [null, null];
+      if (val.endsWith('+')) {
+        const n = Number(val.replace('+',''));
+    return [n, null];
+      }
+      const [a,b] = val.split('-');
+      const min = Number(a);
+      const max = Number(b);
+      return [min, max];
+    }
+
+    function highlight(text, q) {
+      if (!q) return escapeHtml(text);
+      const re = new RegExp(`(${escapeRegExp(q)})`, 'ig');
+      return escapeHtml(text).replace(re, '<mark>$1</mark>');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    }
+
+    function escapeRegExp(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  </script>
+</body>
+</html>
