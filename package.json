@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "fetch": "node src/scripts/initialFetch.js"
+  "fetch": "node src/scripts/initialFetch.js",
+  "test": "echo No tests yet && exit 0",
+  "lint": "echo No lints yet && exit 0"
   },
   "keywords": [
     "github",
